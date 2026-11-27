@@ -1,12 +1,14 @@
 --=========================================================
---  HOODSIDE AUTOFARM v10 (completo + noclip de puertas)
---  F = arrancar/parar autofarm | N = noclip puertas on/off
---  H = copiar nombres de partes cercanas (diagnostico)
+--  HOODSIDE AUTOFARM v16
+--  3 cajas + tipo de caja marcable + diablito + barra de retiro
+--  F = arrancar/parar | N = noclip puertas | B = marcar caja cercana
+--  H = copiar partes cercanas | K = copiar datos de cajas
 --=========================================================
 local Players   = game:GetService("Players")
 local UIS       = game:GetService("UserInputService")
 local RS        = game:GetService("ReplicatedStorage")
 local Pathfind  = game:GetService("PathfindingService")
+local VirtualUser = game:GetService("VirtualUser")
 local lp = Players.LocalPlayer
 local pg = lp:WaitForChild("PlayerGui")
 
@@ -31,7 +33,7 @@ btn.Text = "ARRANCAR"
 btn.Parent = gui
 
 local lbl = Instance.new("TextLabel")
-lbl.Size = UDim2.new(0, 320, 0, 92)
+lbl.Size = UDim2.new(0, 320, 0, 104)
 lbl.Position = UDim2.new(0, 12, 0, 92)
 lbl.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 lbl.BackgroundTransparency = 0.2
@@ -41,26 +43,82 @@ lbl.TextSize = 12
 lbl.TextWrapped = true
 lbl.TextXAlignment = Enum.TextXAlignment.Left
 lbl.TextYAlignment = Enum.TextYAlignment.Top
-lbl.Text = "v10 iniciando..."
+lbl.Text = "v16 iniciando..."
 lbl.Parent = gui
 
 local lblN = Instance.new("TextLabel")
 lblN.Size = UDim2.new(0, 320, 0, 22)
-lblN.Position = UDim2.new(0, 12, 0, 186)
+lblN.Position = UDim2.new(0, 12, 0, 198)
 lblN.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 lblN.BackgroundTransparency = 0.2
 lblN.TextColor3 = Color3.fromRGB(120, 220, 255)
 lblN.Font = Enum.Font.Code
 lblN.TextSize = 12
 lblN.TextXAlignment = Enum.TextXAlignment.Left
-lblN.Text = "noclip puertas: ON | N on/off | H nombres"
+lblN.Text = "noclip puertas: ON | N H K B"
 lblN.Parent = gui
+
+local btnN = Instance.new("TextButton")
+btnN.Size = UDim2.new(0, 158, 0, 26)
+btnN.Position = UDim2.new(0, 12, 0, 224)
+btnN.TextColor3 = Color3.new(1, 1, 1)
+btnN.Font = Enum.Font.Code
+btnN.TextSize = 13
+btnN.Parent = gui
+
+local btnM = Instance.new("TextButton")
+btnM.Size = UDim2.new(0, 158, 0, 26)
+btnM.Position = UDim2.new(0, 174, 0, 224)
+btnM.TextColor3 = Color3.new(1, 1, 1)
+btnM.Font = Enum.Font.Code
+btnM.TextSize = 13
+btnM.Parent = gui
+
+local lblS = Instance.new("TextLabel")
+lblS.Size = UDim2.new(0, 320, 0, 18)
+lblS.Position = UDim2.new(0, 12, 0, 254)
+lblS.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+lblS.BackgroundTransparency = 0.2
+lblS.TextColor3 = Color3.fromRGB(150, 255, 150)
+lblS.Font = Enum.Font.Code
+lblS.TextSize = 12
+lblS.TextXAlignment = Enum.TextXAlignment.Left
+lblS.Text = ""
+lblS.Parent = gui
+
+local barra = Instance.new("Frame")
+barra.Size = UDim2.new(0, 320, 0, 14)
+barra.Position = UDim2.new(0, 12, 0, 274)
+barra.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+barra.Active = true
+barra.Parent = gui
+
+local relleno = Instance.new("Frame")
+relleno.Size = UDim2.new(0, 0, 1, 0)
+relleno.BackgroundColor3 = Color3.fromRGB(60, 170, 80)
+relleno.BorderSizePixel = 0
+relleno.Parent = barra
+
+local TXT_MK = "Marcar caja cercana marron/normal [B]"
+local btnMk = Instance.new("TextButton")
+btnMk.Size = UDim2.new(0, 320, 0, 24)
+btnMk.Position = UDim2.new(0, 12, 0, 294)
+btnMk.BackgroundColor3 = Color3.fromRGB(60, 60, 110)
+btnMk.TextColor3 = Color3.new(1, 1, 1)
+btnMk.Font = Enum.Font.Code
+btnMk.TextSize = 12
+btnMk.Text = TXT_MK
+btnMk.Parent = gui
 
 --------------------------------------------------------------------
 local activo, estado, hilo, ultimoError = false, "cargando", nil, ""
-local CFG = { Umbral = 500, Timeout = 30 }
+local CFG = { Umbral = 1000, Timeout = 30, Max = 3 }
 local W = workspace
 local malos, usados, llevando = {}, {}, false
+local malosG = {}
+local GRABS = {}
+local MARCA = {}                       -- prompt -> "normal" / "marron" (puesto con B)
+local PERM = { normal = true, marron = false }
 
 local function num(s)
 	local d = ""
@@ -77,7 +135,7 @@ local function hijo(padre, nombre, espera)
 	return o
 end
 
-local MERCADO, CASCO, CAJEROS, REQ, CLAIM, GRAB
+local MERCADO, CASCO, CAJEROS, REQ, CLAIM
 local tieneFPP = type(fireproximityprompt) == "function"
 
 local function buscarPrompt(padre, texto)
@@ -85,6 +143,27 @@ local function buscarPrompt(padre, texto)
 		if d:IsA("ProximityPrompt") and d.ActionText:find(texto) then return d end
 	end
 	return nil
+end
+
+local function buscarPrompts(padre, texto)
+	local out = {}
+	for _, d in ipairs(padre:GetDescendants()) do
+		if d:IsA("ProximityPrompt") and d.ActionText:find(texto) then out[#out + 1] = d end
+	end
+	return out
+end
+
+local function posDe(pr)
+	local p = pr.Parent
+	if p then
+		if p:IsA("BasePart") then return p.Position end
+		if p:IsA("Attachment") then return p.WorldPosition end
+		local base = p:FindFirstAncestorWhichIsA("BasePart")
+		if base then return base.Position end
+		local ok, cf = pcall(function() return p:GetPivot() end)
+		if ok and cf then return cf.Position end
+	end
+	return Vector3.new(0, 0, 0)
 end
 
 local function hrp() local c = lp.Character; return c and c:FindFirstChild("HumanoidRootPart") end
@@ -116,6 +195,158 @@ local function dist2(a, b)
 	return Vector3.new(a.X - b.X, 0, a.Z - b.Z).Magnitude
 end
 
+local function maxCajas()
+	for _, pr in ipairs(GRABS) do
+		local m = tostring(pr.ObjectText):match("/(%d+)")
+		if m then return math.clamp(tonumber(m) or CFG.Max, 1, 10) end
+	end
+	return CFG.Max
+end
+
+local function suelo(pos)
+	local ok, res = pcall(function()
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { lp.Character }
+		return workspace:Raycast(pos + Vector3.new(0, 1, 0), Vector3.new(0, -25, 0), params)
+	end)
+	if ok and res then return res.Position + Vector3.new(0, 3, 0) end
+	return pos
+end
+
+--------------------------------------------------------------------
+--  DIABLITO (si esta en la mochila como herramienta, lo equipa)
+--------------------------------------------------------------------
+local function esDiablito(t)
+	return t:IsA("Tool") and t.Name:lower():find("diablito") ~= nil
+end
+
+-- devuelve (lo tiene, herramienta, equipado)
+local function tieneDiablito()
+	local c = lp.Character
+	if c then
+		for _, d in ipairs(c:GetChildren()) do
+			if esDiablito(d) then return true, d, true end
+		end
+	end
+	local bp = lp:FindFirstChildOfClass("Backpack")
+	if bp then
+		for _, d in ipairs(bp:GetChildren()) do
+			if esDiablito(d) then return true, d, false end
+		end
+	end
+	return false, nil, false
+end
+
+local function equiparDiablito()
+	local f, tool, eq = tieneDiablito()
+	if f and not eq then
+		local h = hum()
+		if h then pcall(function() h:EquipTool(tool) end) end
+	end
+end
+
+--------------------------------------------------------------------
+--  TIPOS DE CAJA (normal / marron) - se marcan con B
+--------------------------------------------------------------------
+local function tipoDe(pr)
+	if MARCA[pr] then return MARCA[pr] end
+	local t = tostring(pr.ObjectText):lower()
+	if t:find("diablito") then return "marron" end
+	return "normal"
+end
+
+local function grabCercano()
+	local r = hrp(); if not r then return nil, math.huge end
+	local mejor, d0 = nil, math.huge
+	for _, pr in ipairs(GRABS) do
+		local d = (posDe(pr) - r.Position).Magnitude
+		if d < d0 then mejor, d0 = pr, d end
+	end
+	return mejor, d0
+end
+
+local function marcarCercana()
+	local pr, d = grabCercano()
+	if not pr then return end
+	local nuevo = (tipoDe(pr) == "marron") and "normal" or "marron"
+	MARCA[pr] = nuevo
+	malosG = {}
+	btnMk.Text = "Marcada como " .. nuevo .. " (a " .. string.format("%.1f", d) .. " studs)"
+	task.delay(3, function() btnMk.Text = TXT_MK end)
+end
+btnMk.MouseButton1Click:Connect(marcarCercana)
+
+local function contarTipos()
+	local n, m = 0, 0
+	for _, pr in ipairs(GRABS) do
+		if tipoDe(pr) == "marron" then m = m + 1 else n = n + 1 end
+	end
+	return n, m
+end
+
+local function contarPerm()
+	local p, m = 0, 0
+	for _, pr in ipairs(GRABS) do
+		if PERM[tipoDe(pr)] and pr.Parent then
+			p = p + 1
+			if (malosG[pr] or 0) >= os.clock() then m = m + 1 end
+		end
+	end
+	return p, m
+end
+
+local function refrescarBotones()
+	btnN.Text = "Normales: " .. (PERM.normal and "ON" or "OFF")
+	btnN.BackgroundColor3 = PERM.normal and Color3.fromRGB(30, 110, 50) or Color3.fromRGB(80, 40, 40)
+	btnM.Text = "Marrones: " .. (PERM.marron and "ON" or "OFF")
+	btnM.BackgroundColor3 = PERM.marron and Color3.fromRGB(120, 80, 30) or Color3.fromRGB(80, 40, 40)
+end
+refrescarBotones()
+btnN.MouseButton1Click:Connect(function() PERM.normal = not PERM.normal; refrescarBotones() end)
+btnM.MouseButton1Click:Connect(function()
+	PERM.marron = not PERM.marron
+	refrescarBotones()
+	if PERM.marron then malosG = {} end
+end)
+
+--------------------------------------------------------------------
+--  BARRA DE RETIRO (100 a 5000, de 100 en 100)
+--------------------------------------------------------------------
+local U_MIN, U_MAX, U_PASO = 100, 5000, 100
+
+local function aplicarUmbral(v)
+	v = math.clamp(v, U_MIN, U_MAX)
+	CFG.Umbral = v
+	relleno.Size = UDim2.new((v - U_MIN) / (U_MAX - U_MIN), 0, 1, 0)
+	lblS.Text = "retirar al llegar a: $" .. v .. "  (100 - 5k)"
+end
+aplicarUmbral(CFG.Umbral)
+
+local arrastrando = false
+local function desdeX(x)
+	local rel = math.clamp((x - barra.AbsolutePosition.X) / barra.AbsoluteSize.X, 0, 1)
+	local pasos = (U_MAX - U_MIN) / U_PASO
+	aplicarUmbral(U_MIN + math.floor(rel * pasos + 0.5) * U_PASO)
+end
+barra.InputBegan:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+		arrastrando = true
+		desdeX(i.Position.X)
+	end
+end)
+UIS.InputChanged:Connect(function(i)
+	if arrastrando and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+		desdeX(i.Position.X)
+	end
+end)
+UIS.InputEnded:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+		arrastrando = false
+	end
+end)
+
+--------------------------------------------------------------------
 local function usar(pr, alterno)
 	if not pr then return false end
 	local t0 = os.clock()
@@ -136,13 +367,41 @@ local function usar(pr, alterno)
 end
 
 --------------------------------------------------------------------
+--  ANTI AFK
+--------------------------------------------------------------------
+pcall(function()
+	if getconnections then
+		for _, c in ipairs(getconnections(lp.Idled)) do
+			pcall(function() c:Disable() end)
+		end
+	end
+end)
+
+lp.Idled:Connect(function()
+	pcall(function()
+		VirtualUser:CaptureController()
+		VirtualUser:ClickButton2(Vector2.new())
+	end)
+end)
+
+task.spawn(function()
+	while gui.Parent do
+		task.wait(300)
+		pcall(function()
+			VirtualUser:CaptureController()
+			VirtualUser:ClickButton2(Vector2.new())
+		end)
+	end
+end)
+
+--------------------------------------------------------------------
 --  NOCLIP SOLO PUERTAS
 --------------------------------------------------------------------
 local RADIO_NC = 14
 local PATRONES = { "door", "puerta", "porton", "gate", "entrada" }
 local ncActivo = true
-local ncCache = {}     -- parte -> es puerta (true/false)
-local ncApagadas = {}  -- parte -> CanCollide original
+local ncCache = {}
+local ncApagadas = {}
 
 local function esPuerta(part)
 	local c = ncCache[part]
@@ -202,7 +461,7 @@ task.spawn(function()
 
 			local n = 0
 			for _ in pairs(ncApagadas) do n = n + 1 end
-			lblN.Text = "noclip puertas: ON (" .. n .. " partes) | N on/off | H nombres"
+			lblN.Text = "noclip puertas: ON (" .. n .. ") | N H K B"
 		end)
 		task.wait(0.15)
 	end
@@ -253,20 +512,42 @@ local function irA(pos, radio, timeout)
 	return r ~= nil and dist2(r.Position, pos) <= radio + 1.5
 end
 
-local function alcanzable(pos)
+local function alcanzable(pos, tol)
+	tol = tol or 6
 	local r = hrp(); if not r then return false, math.huge end
 	local path = Pathfind:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
 	local ok = pcall(function() path:ComputeAsync(r.Position, pos) end)
 	if not ok or path.Status ~= Enum.PathStatus.Success then return false, math.huge end
 	local wps = path:GetWaypoints()
 	local last = wps[#wps]
-	if not last or dist2(last.Position, pos) > 6 then return false, math.huge end
+	if not last or dist2(last.Position, pos) > tol then return false, math.huge end
 	local len, prev = 0, r.Position
 	for _, w in ipairs(wps) do
 		len = len + (w.Position - prev).Magnitude
 		prev = w.Position
 	end
 	return true, len
+end
+
+-- devuelve (caja, tieneRuta). Si ninguna tiene ruta, devuelve la mas cercana en linea recta
+local function elegirGrab()
+	local mejor, mejorLen = nil, math.huge
+	local cercano, cercanoD = nil, math.huge
+	local r = hrp()
+	for _, pr in ipairs(GRABS) do
+		if PERM[tipoDe(pr)] and pr.Parent and (malosG[pr] or 0) < os.clock() then
+			local pos = posDe(pr)
+			local ok, len = alcanzable(suelo(pos), 12)
+			if ok then
+				if len < mejorLen then mejor, mejorLen = pr, len end
+			elseif r then
+				local d = (pos - r.Position).Magnitude
+				if d < cercanoD then cercano, cercanoD = pr, d end
+			end
+		end
+	end
+	if mejor then return mejor, true end
+	return cercano, false
 end
 
 local function destinoDe(pad)
@@ -290,7 +571,6 @@ local function pads()
 	return out
 end
 
--- un estante esta "activo" si su luz, haz o anillo estan encendidos
 local function encendido(p)
 	for _, d in ipairs(p:GetDescendants()) do
 		if d:IsA("PointLight") or d:IsA("Beam") or d:IsA("SurfaceGui") then
@@ -304,7 +584,6 @@ end
 local function elegirPad()
 	local lista = pads()
 
-	-- 1) el estante con la luz encendida (el del haz amarillo)
 	local r = hrp()
 	local mejor, mejorD = nil, math.huge
 	for _, p in ipairs(lista) do
@@ -318,7 +597,6 @@ local function elegirPad()
 		return mejor
 	end
 
-	-- 2) fallback: el alcanzable mas cercano
 	local mejorLen = math.huge
 	mejor = nil
 	for _, p in ipairs(lista) do
@@ -353,6 +631,8 @@ local function ciclo()
 	while activo do
 		local ok, err = pcall(function()
 			if llevando and cajas() == 0 then llevando = false; usados = {} end
+			if job() == "reponedor" then equiparDiablito() end
+			local MAXC = maxCajas()
 
 			if not vivo() then
 				estado = "MUERTO, esperando"
@@ -381,16 +661,31 @@ local function ciclo()
 						usar(CLAIM, i % 2 == 0); task.wait(1)
 					end
 				else estado = "SIN PROMPT DE TRABAJO" end
-			elseif not llevando and cajas() < 2 then
-				estado = "agarrando caja"
-				if GRAB then
-					irA(GRAB.Parent.Position, 3)
-					for i = 1, 4 do
-						if not activo or not vivo() or cajas() >= 2 then break end
-						usar(GRAB, i % 2 == 0); task.wait(1)
+			elseif not llevando and cajas() < MAXC then
+				if not PERM.normal and not PERM.marron then
+					estado = "ELEGI UN TIPO DE CAJA"
+					task.wait(1)
+				else
+					local pr, conRuta = elegirGrab()
+					if not pr then
+						local p, m = contarPerm()
+						estado = "SIN CAJA (permitidas " .. p .. ", malas " .. m .. ")"
+						task.wait(1.5)
+					else
+						estado = "agarrando caja (" .. tipoDe(pr) .. ")" .. (conRuta and "" or " (directo)")
+						local antes = cajas()
+						irA(posDe(pr), 3, conRuta and CFG.Timeout or 12)
+						for i = 1, 6 do
+							if not activo or not vivo() or cajas() >= MAXC then break end
+							usar(pr, i % 2 == 0); task.wait(1)
+						end
+						if cajas() > antes then
+							llevando = true
+						else
+							malosG[pr] = os.clock() + 60
+						end
 					end
-					if cajas() > 0 then llevando = true end
-				else estado = "SIN PROMPT DE CAJA" end
+				end
 			else
 				llevando = true
 				local pad = elegirPad()
@@ -432,7 +727,8 @@ local function iniciar()
 	local rem = hijo(RS, "Remotes"); REQ = rem and hijo(rem, "Request")
 	if not REQ then error("no encuentro Remotes.Request") end
 	CLAIM = buscarPrompt(hijo(MERCADO, "Contratando") or MERCADO, "Tomar el trabajo")
-	GRAB  = buscarPrompt(CASCO, "Coger caja")
+	GRABS = buscarPrompts(MERCADO, "Coger caja")
+	if #GRABS == 0 then error("no encuentro ninguna caja (Coger caja)") end
 	estado = "listo"
 end
 
@@ -442,8 +738,12 @@ if not ok then ultimoError = "INIT: " .. tostring(err) end
 task.spawn(function()
 	while gui.Parent do
 		local o, e = pcall(function()
-			lbl.Text = string.format("estado: %s\ncajas: %d | plata: $%d\ntrabajo: %s | pads: %d\nerr: %s",
-				estado, cajas(), efectivo(), tostring(job()), #pads(), ultimoError)
+			local nN, nM = contarTipos()
+			local dj = tieneDiablito()
+			lbl.Text = string.format(
+				"estado: %s\ncajas: %d/%d | plata: $%d\ntrabajo: %s | pads: %d | diablito: %s\ncajas disp: %d (%d norm / %d marr)\nerr: %s",
+				estado, cajas(), maxCajas(), efectivo(), tostring(job()), #pads(), dj and "si" or "no",
+				#GRABS, nN, nM, ultimoError)
 		end)
 		if not o then lbl.Text = "ERROR PANEL: " .. tostring(e) end
 		task.wait(0.3)
@@ -469,11 +769,13 @@ UIS.InputBegan:Connect(function(i, gp)
 	if gp then return end
 	if i.KeyCode == Enum.KeyCode.F then
 		if activo then parar() else arrancar() end
+	elseif i.KeyCode == Enum.KeyCode.B then
+		marcarCercana()
 	elseif i.KeyCode == Enum.KeyCode.N then
 		ncActivo = not ncActivo
 		if not ncActivo then
 			ncRestaurarTodo()
-			lblN.Text = "noclip puertas: OFF | N on/off"
+			lblN.Text = "noclip puertas: OFF | N H K B"
 		end
 	elseif i.KeyCode == Enum.KeyCode.H then
 		local root = hrp()
@@ -487,5 +789,15 @@ UIS.InputBegan:Connect(function(i, gp)
 		end
 		pcall(function() if setclipboard then setclipboard(table.concat(out, "\n")) end end)
 		lblN.Text = "copiadas " .. #out .. " partes cercanas"
+	elseif i.KeyCode == Enum.KeyCode.K then
+		local out = {}
+		for idx, pr in ipairs(GRABS) do
+			local p = posDe(pr)
+			out[#out + 1] = idx .. " | " .. tipoDe(pr) .. " | texto=" .. tostring(pr.ObjectText) ..
+				" | pos=" .. string.format("%.0f, %.0f, %.0f", p.X, p.Y, p.Z) ..
+				" | " .. pr:GetFullName()
+		end
+		pcall(function() if setclipboard then setclipboard(table.concat(out, "\n")) end end)
+		lblN.Text = "copiadas " .. #out .. " cajas (K)"
 	end
 end)
